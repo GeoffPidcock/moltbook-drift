@@ -28,7 +28,10 @@ arms in `CONDITIONS`. The defaults pin:
 - seed 42, one epoch, and 20 forced-choice decisions;
 - 10 feed rounds of five unique posts;
 - deterministic feed and option shuffling;
-- no automatic retries and no decision chain-of-thought request.
+- no automatic retries and no decision chain-of-thought request;
+- a 1,024-token cap for each feed reaction and a 2,048-token cap for the final
+  choice, keeping long feeds within the pinned provider's context window without
+  clipping the decision to the same short allowance.
 
 The parser accepts exactly one final in-range letter, optionally prefixed with
 `ANSWER:`. Parse failures are retained and excluded from both outcome numerators
@@ -64,5 +67,12 @@ publish a run, move the complete folder into a numbered `experiments/` directory
 write a short provenance README, and add its result rows to
 `experiments/results.csv`.
 
-`runner.py` is the testable implementation behind the notebook, not a replacement for
-the notebook workflow.
+The matched condition triplets used by the latest log-backed experiments are:
+
+```python
+["a_evil_baseline", "a_evil_neutral", "evil_a"]
+["f_manipulative_baseline", "f_manipulative_neutral", "manipulative_f"]
+```
+
+`runner.py` is the testable implementation behind the notebook, not a replacement
+for the notebook workflow.

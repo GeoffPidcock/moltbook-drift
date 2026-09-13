@@ -19,7 +19,7 @@ import random
 import re
 import subprocess
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -51,6 +51,11 @@ class ExperimentConfig:
     temperature: float | None = None
     top_p: float | None = None
     max_tokens: int | None = None
+    # Bound feed reactions so the larger persona feeds remain inside the
+    # pinned provider's 40,960-token context window. Give the final forced
+    # choice decision more room so reasoning is not clipped before the answer.
+    feed_max_tokens: int = 1024
+    decision_max_tokens: int = 2048
     provider_seed: int | None = None
     rounds: int = 10
     posts_per_round: int = 5
@@ -103,6 +108,65 @@ CONDITIONS: dict[str, Condition] = {
         ("assistant", "poet", "pirate"),
         feed_persona="poet",
         control_id="a_neutral",
+    ),
+    # Evil-A shares the topic with poet/pirate-A but not their option set, so it
+    # requires its own matched baseline and neutral arms.
+    "a_evil_baseline": Condition(
+        "a_evil_baseline",
+        "A",
+        "baseline",
+        ("assistant", "evil-mild", "evil-high"),
+    ),
+    "a_evil_neutral": Condition(
+        "a_evil_neutral",
+        "A",
+        "neutral",
+        ("assistant", "evil-mild", "evil-high"),
+        feed_persona="assistant",
+        control_id="a_evil_baseline",
+    ),
+    "evil_a": Condition(
+        "evil_a",
+        "A",
+        "exposed",
+        ("assistant", "evil-mild", "evil-high"),
+        feed_persona="evil",
+        control_id="a_evil_neutral",
+    ),
+    # Manipulative-F likewise needs controls matched on category and options.
+    "f_manipulative_baseline": Condition(
+        "f_manipulative_baseline",
+        "F",
+        "baseline",
+        (
+            "assistant",
+            "malicious-manipulative-mild",
+            "malicious-manipulative-high",
+        ),
+    ),
+    "f_manipulative_neutral": Condition(
+        "f_manipulative_neutral",
+        "F",
+        "neutral",
+        (
+            "assistant",
+            "malicious-manipulative-mild",
+            "malicious-manipulative-high",
+        ),
+        feed_persona="assistant",
+        control_id="f_manipulative_baseline",
+    ),
+    "manipulative_f": Condition(
+        "manipulative_f",
+        "F",
+        "exposed",
+        (
+            "assistant",
+            "malicious-manipulative-mild",
+            "malicious-manipulative-high",
+        ),
+        feed_persona="malicious-manipulative",
+        control_id="f_manipulative_neutral",
     ),
     # Evil-E has different prompts/options, so category-A controls cannot be reused.
     "e_baseline": Condition(
@@ -480,18 +544,19 @@ def run_dry(
     selected: list[str],
     data_repo: Path,
     output_root: Path = LOCAL_RUNS_DIR,
+    config: ExperimentConfig = CONFIG,
 ) -> list[dict[str, Any]]:
     persona, decision, system_prompt = load_inputs(data_repo)
     output_dir = output_root / "dry-run"
     output_dir.mkdir(parents=True, exist_ok=True)
     _write_json(
         output_dir / "resolved-config.json",
-        resolved_configuration(CONFIG, data_repo, system_prompt, selected, "dry-run"),
+        resolved_configuration(config, data_repo, system_prompt, selected, "dry-run"),
     )
     write_coverage(persona)
 
     checks = [
-        validate_condition(persona, decision, CONDITIONS[name], CONFIG)
+        validate_condition(persona, decision, CONDITIONS[name], config)
         for name in selected
     ]
     fixture_rows = []
@@ -500,8 +565,8 @@ def run_dry(
         trials = build_decisions(
             decision,
             condition,
-            seed=CONFIG.seed,
-            sample_count=CONFIG.sample_count,
+            seed=config.seed,
+            sample_count=config.sample_count,
         )
         answers = [
             f"ANSWER: {trial['target']}" if index % 4 else "unparseable fixture"
@@ -578,7 +643,7 @@ def build_task(
                         content=render_round(contents, display_index, len(feed))
                     )
                 )
-                state = await generate(state)
+                state = await generate(state, max_tokens=config.feed_max_tokens)
                 handles.append([_handle(content) for content in contents])
             state.store.set("feed_round_order", order)
             state.store.set("feed_round_handles", handles)
@@ -590,8 +655,35 @@ def build_task(
     solvers = [system_message(system_prompt)]
     if feed:
         solvers.append(scroll_feed())
-    solvers.append(multiple_choice(cot=config.decision_cot))
+    solvers.append(
+        multiple_choice(
+            cot=config.decision_cot,
+            max_tokens=config.decision_max_tokens,
+        )
+    )
     return Task(dataset=MemoryDataset(samples), solver=solvers, scorer=choice())
+
+
+def generation_kwargs(config: ExperimentConfig = CONFIG) -> dict[str, Any]:
+    """Return Inspect-supported generation keywords, omitting provider defaults."""
+    values: dict[str, Any] = {
+        "max_retries": config.max_retries,
+        "max_connections": config.max_connections,
+        "extra_body": {
+            "provider": {
+                "order": [config.provider_name],
+                "allow_fallbacks": config.allow_fallbacks,
+                "quantizations": list(config.provider_quantizations),
+            }
+        },
+    }
+    for name in ("temperature", "top_p", "max_tokens"):
+        value = getattr(config, name)
+        if value is not None:
+            values[name] = value
+    if config.provider_seed is not None:
+        values["seed"] = config.provider_seed
+    return values
 
 
 def run_live(
@@ -599,13 +691,13 @@ def run_live(
     data_repo: Path,
     confirmed: bool,
     output_root: Path = LOCAL_RUNS_DIR,
+    config: ExperimentConfig = CONFIG,
 ) -> Path:
     if not confirmed:
         raise PermissionError("paid runs require --yes after reviewing the config and cost")
 
     from dotenv import load_dotenv
     from inspect_ai import eval as inspect_eval
-    from inspect_ai.model import GenerateConfig
 
     load_dotenv(REPO_ROOT / ".env")
     if not os.environ.get("OPENROUTER_API_KEY"):
@@ -613,30 +705,14 @@ def run_live(
 
     persona, decision, system_prompt = load_inputs(data_repo)
     for name in selected:
-        validate_condition(persona, decision, CONDITIONS[name], CONFIG)
+        validate_condition(persona, decision, CONDITIONS[name], config)
 
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     run_dir = output_root / run_id
     run_dir.mkdir(parents=True, exist_ok=False)
     _write_json(
         run_dir / "resolved-config.json",
-        resolved_configuration(CONFIG, data_repo, system_prompt, selected, "live"),
-    )
-
-    generate_config = GenerateConfig(
-        max_retries=CONFIG.max_retries,
-        max_connections=CONFIG.max_connections,
-        temperature=CONFIG.temperature,
-        top_p=CONFIG.top_p,
-        max_tokens=CONFIG.max_tokens,
-        seed=CONFIG.provider_seed,
-        extra_body={
-            "provider": {
-                "order": [CONFIG.provider_name],
-                "allow_fallbacks": CONFIG.allow_fallbacks,
-                "quantizations": list(CONFIG.provider_quantizations),
-            }
-        },
+        resolved_configuration(config, data_repo, system_prompt, selected, "live"),
     )
 
     result_rows: list[dict[str, Any]] = []
@@ -644,11 +720,12 @@ def run_live(
         condition = CONDITIONS[name]
         log_dir = run_dir / name
         logs = inspect_eval(
-            build_task(condition, persona, decision, system_prompt, CONFIG),
-            model=CONFIG.model,
-            epochs=CONFIG.epochs,
+            build_task(condition, persona, decision, system_prompt, config),
+            model=config.model,
+            epochs=config.epochs,
             log_dir=str(log_dir),
-            config=generate_config,
+            display="plain",
+            **generation_kwargs(config),
         )
         log = logs[0]
         observed_trials = [
@@ -691,6 +768,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--data-repo", help="path to the pinned data repository")
     parser.add_argument(
+        "--seed",
+        type=int,
+        default=CONFIG.seed,
+        help=f"sampling and shuffle seed (default: {CONFIG.seed})",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=LOCAL_RUNS_DIR,
@@ -707,11 +790,12 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     data_repo = resolve_data_repo(args.data_repo)
+    config = replace(CONFIG, seed=args.seed)
     if args.mode == "dry-run":
-        checks = run_dry(args.conditions, data_repo, args.output_dir)
+        checks = run_dry(args.conditions, data_repo, args.output_dir, config)
         print(json.dumps({"status": "ok", "conditions": checks}, indent=2))
     else:
-        run_dir = run_live(args.conditions, data_repo, args.yes, args.output_dir)
+        run_dir = run_live(args.conditions, data_repo, args.yes, args.output_dir, config)
         print(f"run written to {run_dir}")
     return 0
 

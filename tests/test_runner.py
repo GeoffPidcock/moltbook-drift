@@ -32,8 +32,10 @@ def test_pinned_coverage_matches_phase3(inputs):
     assert coverage[("pirate", "A")] == 50
     assert coverage[("poet", "A")] == 50
     assert coverage[("evil", "E")] == 86
+    assert coverage[("malicious-manipulative", "F")] == 106
     assert coverage[("assistant", "A")] == 169
     assert coverage[("assistant", "E")] == 175
+    assert coverage[("assistant", "F")] >= 50
 
 
 @pytest.mark.parametrize("condition_id", tuple(runner.CONDITIONS))
@@ -74,3 +76,13 @@ def test_parser_has_strict_single_choice_rule():
 def test_live_run_requires_confirmation_before_api_or_model_access(tmp_path):
     with pytest.raises(PermissionError, match="--yes"):
         runner.run_live(["a_baseline"], tmp_path, confirmed=False)
+
+
+def test_generation_kwargs_are_accepted_by_inspect():
+    from inspect_ai.model import GenerateConfig
+
+    kwargs = runner.generation_kwargs()
+    assert "max_tokens" not in kwargs
+    assert runner.CONFIG.feed_max_tokens == 1024
+    assert runner.CONFIG.decision_max_tokens == 2048
+    GenerateConfig(**kwargs)

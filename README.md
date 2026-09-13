@@ -21,8 +21,9 @@ explanations.
 Across the exploratory runs, exposure to non-harmful stylistic personas (poet and
 pirate) produced large shifts away from the assistant option at 20 decisions per
 arm. The poet result was observed again in a separately executed positive-control
-run backed by raw Inspect logs. Under the harmful-persona conditions tested so far,
-we did not detect comparable movement at this sample size.
+run backed by raw Inspect logs. The harmful-persona conditions produced much
+smaller changes at this sample size, including in the new category-matched Evil-A
+and Manipulative-F runs.
 
 | Exposure | Neutral | Exposed | Difference | Evidence |
 |---|---:|---:|---:|---|
@@ -30,6 +31,8 @@ we did not detect comparable movement at this sample size.
 | Poet, category A (positive-control rerun) | 2/20 | 18/20 | +0.80 | raw Inspect logs |
 | Pirate, category A | 2/20 | 16/20 | +0.70 | exploratory notebook |
 | Manipulative, completed A/B/D runs (descriptive pool) | 4/60 | 5/60 | +0.017 | exploratory notebooks |
+| Manipulative, category F | 0/20 | 0/20 | +0.00 | raw Inspect logs |
+| Evil, category A (three runs) | 0/60 | 3/60 | +0.05 | raw Inspect logs |
 | Evil, category E | 0/20 | 1/20 | +0.05 | exploratory notebook |
 
 “Category” denotes the topic stratum shared by the feed posts and held-out choice
@@ -37,6 +40,14 @@ questions: **A** Identity, **B** Technology, **C** Socializing, **D** Economics,
 **E** Viewpoint, and **F** Promotion. For example, “poet-A” tests poet-style
 exposure and choices within the Identity category. Categories are kept separate
 because their prompts, available persona content, and decision options can differ.
+
+The A/B/D manipulative row is pooled only as a compact descriptive summary: those
+runs share the same persona contrast and forced-choice option family, and combining
+their counts shows the overall scale of the observations more clearly than three
+very small rows. It is not the primary causal estimate. Category may moderate the
+effect, and those historical notebooks used an earlier sampler without recorded
+data revisions. Manipulative-F is therefore reported separately as a current,
+category-controlled run rather than folded into an inferential A/B/D/F estimate.
 
 The positive-control rerun has one documented qualification: its neutral arm used
 50 source IDs representing 49 unique content strings. The exposed poet arm and
@@ -77,11 +88,14 @@ recorded in [`sandbox/coverage.csv`](sandbox/coverage.csv).
 experiments/
 ├── results.csv             machine-readable index of observed results
 ├── 01,04,05,06,08,09/     completed exploratory notebooks and figures
-└── 10_assistant_poet_A_positive_control/
+├── 10_assistant_poet_A_positive_control/
     ├── README.md           experiment status and provenance
     ├── RUN.md              configuration, counts, costs, and checksums
     ├── notebook.ipynb      contemporaneous analysis notebook
     └── logs/               raw Inspect .eval logs for all three arms
+├── 11_assistant_evil_A_3x/ three matched repetitions, summaries, and raw logs
+└── 12_assistant_manipulative_F/
+    └── run/                matched category-F configuration and raw logs
 
 sandbox/
 ├── README.md               reproduction and extension guide
@@ -95,7 +109,8 @@ tests/
 
 The numbered notebooks are retained as historical evidence, not as the canonical
 runner. Most lack their original `.eval` logs and used an earlier raw sampler.
-Experiment 10 is the current end-to-end example with committed raw logs.
+Experiments 10–12 provide log-backed evidence; experiments 11 and 12 use the
+current tested implementation behind the sandbox notebook.
 
 ## Reproduce or extend the experiment
 
