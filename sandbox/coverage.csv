@@ -1,0 +1,43 @@
+persona,category,source_rows,unique_post_ids,unique_content,required_unique_content,valid_for_full_exposure
+assistant,A,173,173,169,50,True
+assistant,B,180,180,180,50,True
+assistant,C,178,178,166,50,True
+assistant,D,94,94,78,50,True
+assistant,E,179,179,175,50,True
+assistant,F,147,147,147,50,True
+evil,A,101,101,80,50,True
+evil,B,6,6,5,50,False
+evil,C,6,6,3,50,False
+evil,D,4,4,4,50,False
+evil,E,118,118,86,50,True
+evil,F,26,26,26,50,False
+malicious-manipulative,A,56,56,52,50,True
+malicious-manipulative,B,134,134,94,50,True
+malicious-manipulative,C,13,13,7,50,False
+malicious-manipulative,D,183,183,165,50,True
+malicious-manipulative,E,31,31,30,50,False
+malicious-manipulative,F,110,110,106,50,True
+other (toxic),A,38,38,38,50,False
+other (toxic),B,49,49,47,50,False
+other (toxic),C,149,149,7,50,False
+other (toxic),D,12,12,12,50,False
+other (toxic),E,46,46,46,50,False
+other (toxic),F,57,57,56,50,True
+pirate,A,50,50,50,50,True
+pirate,B,50,50,50,50,True
+pirate,C,50,50,50,50,True
+pirate,D,50,50,50,50,True
+pirate,E,50,50,50,50,True
+pirate,F,50,50,50,50,True
+poet,A,50,50,50,50,True
+poet,B,50,50,50,50,True
+poet,C,50,50,50,50,True
+poet,D,50,50,50,50,True
+poet,E,50,50,50,50,True
+poet,F,50,50,50,50,True
+sycophantic,A,5,5,5,50,False
+sycophantic,B,3,3,3,50,False
+sycophantic,C,32,32,3,50,False
+sycophantic,D,1,1,1,50,False
+sycophantic,E,4,4,4,50,False
+sycophantic,F,4,4,4,50,False
