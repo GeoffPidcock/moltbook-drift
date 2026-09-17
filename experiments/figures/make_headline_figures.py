@@ -5,6 +5,11 @@ Reads experiments/results.csv and renders two PNGs into this directory:
   fig1_poet_A_positive_control.png  three arms of the log-backed poet-A control
   fig2_evil_A_replicates.png        three matched repetitions of evil-A
 
+fig3 reads the Inspect logs directly rather than results.csv, and caches the parsed
+reactions in analysis/reactions.parquet:
+
+  fig3_feed_reactions.png           what the model did to the feed, neutral vs exposed
+
 Both use Wilson 95% intervals rather than +/- SEM: at n=20 with rates near 0
 or 1 the normal approximation runs off the end of the scale.
 
@@ -12,6 +17,7 @@ or 1 the normal approximation runs off the end of the scale.
 """
 
 import math
+import re
 from pathlib import Path
 
 import matplotlib
@@ -50,18 +56,22 @@ def wilson(k, n, z=1.96):
     return max(0.0, centre - half), min(1.0, centre + half)
 
 
-def rounded_bar(ax, x, width, height, color, radius=0.018):
-    """Bar with 4px-ish rounded top corners, square where it meets the baseline."""
+def rounded_bar(ax, x, width, height, color, radius=0.018, bottom=0.0, round_top=True):
+    """Bar with 4px-ish rounded top corners, square where it meets its baseline.
+
+    ``bottom`` and ``round_top=False`` let the same helper draw the lower segments of
+    a stacked bar, where only the topmost segment carries the rounding.
+    """
     if height <= 0:
         return
-    r = min(radius, height, width / 2)
-    left, right, top = x - width / 2, x + width / 2, height
+    r = min(radius, height, width / 2) if round_top else 0.0
+    left, right, top = x - width / 2, x + width / 2, bottom + height
     verts = [
-        (left, 0), (left, top - r),
+        (left, bottom), (left, top - r),
         (left, top), (left + r, top),
         (right - r, top),
         (right, top), (right, top - r),
-        (right, 0), (left, 0),
+        (right, bottom), (left, bottom),
     ]
     codes = [
         MPath.MOVETO, MPath.LINETO,
@@ -243,7 +253,132 @@ def fig_evil(df):
     return path
 
 
+# ---------------------------------------------------------------- figure 3
+ACTION_COLOR = {"UPVOTE": "#2a78d6", "FOLLOW": "#1baf7a", "SKIP": "#eb6834"}
+ACTION_ORDER = ["UPVOTE", "FOLLOW", "SKIP"]     # stack order, bottom to top
+ACT_RE = re.compile(r"^\s*post\s*(\d+)\s*[:\-\u2013]\s*(UPVOTE|FOLLOW|SKIP)\b", re.I | re.M)
+
+# evil-A (seeds 42-44) and manipulative-A (seeds 42-45); category A in both, so the
+# two families are option- and topic-matched against their own assistant-feed control.
+REACTION_ARMS = {
+    "a_evil_neutral": ("evil", "neutral"),
+    "evil_a": ("evil", "exposed"),
+    "a_manipulative_neutral": ("manipulative", "neutral"),
+    "manipulative_a": ("manipulative", "exposed"),
+}
+
+
+def load_reactions():
+    """One row per labelled feed action. Parses the logs once, then caches."""
+    cache = REPO / "analysis" / "reactions.parquet"
+    if cache.exists():
+        return pd.read_parquet(cache)
+
+    from inspect_ai.log import read_eval_log
+
+    rows = []
+    for path in sorted((REPO / "experiments").glob("1[123]_*/**/*.eval")):
+        arm = REACTION_ARMS.get(path.parent.name)
+        if arm is None:
+            continue
+        family, arm_name = arm
+        for sample in read_eval_log(str(path)).samples or []:
+            order = sample.store.get("feed_round_order") or []
+            assistant = [m for m in sample.messages if m.role == "assistant"]
+            # assistant[:10] are the ten feed rounds in display order; [10] is the
+            # forced choice. Index positionally: one run returned an empty round, and
+            # filtering to rounds that parsed would silently shift every later round.
+            for display_round in range(len(order)):
+                for post_index, action in ACT_RE.findall(assistant[display_round].text or ""):
+                    rows.append({
+                        "run": path.parent.parent.name, "family": family, "arm": arm_name,
+                        "display_round": display_round, "post_index": int(post_index),
+                        "action": action.upper(),
+                    })
+    frame = pd.DataFrame(rows)
+    cache.parent.mkdir(exist_ok=True)
+    frame.to_parquet(cache)
+    return frame
+
+
+def fig_reactions(reactions):
+    families = ["evil", "manipulative"]
+    xs = {("evil", "neutral"): 0.0, ("evil", "exposed"): 1.15,
+          ("manipulative", "neutral"): 3.00, ("manipulative", "exposed"): 4.15}
+
+    fig, ax = plt.subplots(figsize=(8.4, 5.6), dpi=200)
+    fig.patch.set_facecolor(SURFACE)
+    style(ax)
+    ax.set_axisbelow(True)
+    ax.yaxis.grid(True, color=GRID, linewidth=1.0)
+
+    skip = {}
+    for (family, arm), x in xs.items():
+        sub = reactions[(reactions.family == family) & (reactions.arm == arm)]
+        shares = sub.action.value_counts(normalize=True)
+        skip[(family, arm)] = float(shares.get("SKIP", 0.0))
+        bottom = 0.0
+        for action in ACTION_ORDER:
+            height = float(shares.get(action, 0.0))
+            rounded_bar(ax, x, 0.78, height - 0.005, ACTION_COLOR[action],
+                        bottom=bottom, round_top=action == ACTION_ORDER[-1])
+            if height >= 0.08:
+                ax.text(x, bottom + height / 2, f"{height:.0%}", ha="center", va="center",
+                        fontsize=10, color=INK if action == "FOLLOW" else SURFACE,
+                        fontweight="bold" if action == "SKIP" else "normal", zorder=5)
+            bottom += height
+        ax.text(x, -0.035, "assistant feed" if arm == "neutral" else f"{family} feed",
+                ha="center", va="top", fontsize=9.5,
+                color=INK_2 if arm == "neutral" else INK,
+                fontweight="normal" if arm == "neutral" else "bold")
+        ax.text(x, -0.082, f"control\nn = {len(sub):,}" if arm == "neutral"
+                else f"exposed\nn = {len(sub):,}", ha="center", va="top",
+                fontsize=8.5, color=INK_2, linespacing=1.4)
+
+    # the effect, stated on the chart rather than left to be read off the stack
+    for family, label in zip(families, ["evil-A", "manipulative-A"]):
+        left, right = xs[(family, "neutral")], xs[(family, "exposed")]
+        delta = skip[(family, "exposed")] - skip[(family, "neutral")]
+        top = max(skip[(family, "exposed")], skip[(family, "neutral")])
+        ax.text((left + right) / 2, 1.045, f"{label}   SKIP {delta:+.1%}",
+                ha="center", va="bottom", fontsize=10, color=INK, fontweight="bold")
+
+    ax.set_xlim(-0.75, 4.90)
+    ax.set_ylim(0, 1.0)
+    ax.set_xticks([])
+    ax.set_yticks([0, 0.25, 0.5, 0.75, 1.0])
+    ax.set_yticklabels(["0", "25%", "50%", "75%", "100%"])
+    ax.set_ylabel("share of feed reactions", fontsize=10, color=INK_2, labelpad=8)
+    ax.spines["bottom"].set_visible(False)
+
+    ax.legend(
+        handles=[Patch(facecolor=ACTION_COLOR[a], label=a.title()) for a in ACTION_ORDER][::-1],
+        loc="center left", bbox_to_anchor=(1.01, 0.5), frameon=False, fontsize=9.5,
+        labelcolor=INK_2, handlelength=1.1, handleheight=1.1, borderpad=0,
+    )
+
+    fig.text(0.045, 0.955, "The model refuses evil content, and lets manipulation through",
+             fontsize=15, fontweight="bold", color=INK, ha="left", va="top")
+    fig.text(0.045, 0.905,
+             "qwen3-32b, category A (Identity); every feed post drew one labelled reaction",
+             fontsize=9.5, color=INK_2, ha="left", va="top")
+    fig.text(0.045, 0.025,
+             "Read against its own assistant-feed control, SKIP rises 44pp under evil and 25pp "
+             "under manipulative \u2014 but the model still\nUPVOTEs 51% of manipulative posts. "
+             "SKIP is not one construct: in the control arms its stated reasons are quality "
+             "judgements\n(\u201clacks substance\u201d), in the exposed arms they are safety ones. "
+             "Shares are over ~1,000 actions per run, but only 50 unique posts \u2014\ncluster on "
+             "posts before putting an interval on any of this.",
+             fontsize=8, color=INK_2, ha="left", va="bottom", linespacing=1.5)
+
+    fig.subplots_adjust(left=0.11, right=0.83, top=0.78, bottom=0.33)
+    path = OUT / "fig3_feed_reactions.png"
+    fig.savefig(path, facecolor=SURFACE)
+    plt.close(fig)
+    return path
+
+
 if __name__ == "__main__":
     data = load()
-    for p in (fig_poet(data), fig_evil(data)):
+    for p in (fig_poet(data), fig_evil(data), fig_reactions(load_reactions())):
         print(f"wrote {p.relative_to(REPO)}")

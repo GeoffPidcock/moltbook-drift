@@ -80,6 +80,7 @@ class Condition:
 
 
 CONDITIONS: dict[str, Condition] = {
+    # specifies data sampling conditions for the various experiments.
     # Poet and pirate share controls: category, prompts, options, model, soul,
     # seed, feed shape, sampling rules, and scorer are identical.
     "a_baseline": Condition(
@@ -133,7 +134,42 @@ CONDITIONS: dict[str, Condition] = {
         feed_persona="evil",
         control_id="a_evil_neutral",
     ),
-    # Manipulative-F likewise needs controls matched on category and options.
+    # manipulative options
+    "a_manipulative_baseline": Condition(
+        "a_manipulative_baseline",
+        "A",
+        "baseline",
+        (
+            "assistant",
+            "malicious-manipulative-mild",
+            "malicious-manipulative-high",
+        ),
+    ),
+    "a_manipulative_neutral": Condition(
+        "a_manipulative_neutral",
+        "A",
+        "neutral",
+        (
+            "assistant",
+            "malicious-manipulative-mild",
+            "malicious-manipulative-high",
+        ),
+        feed_persona="assistant",
+        control_id="a_manipulative_baseline",
+    ),
+    "manipulative_a": Condition(
+        "manipulative_a",
+        "A",
+        "exposed",
+        (
+            "assistant",
+            "malicious-manipulative-mild",
+            "malicious-manipulative-high",
+        ),
+        feed_persona="malicious-manipulative",
+        control_id="a_manipulative_neutral",
+    ),    
+    # Manipulative-F needs controls matched on category and options.
     "f_manipulative_baseline": Condition(
         "f_manipulative_baseline",
         "F",
@@ -695,6 +731,10 @@ def run_live(
 ) -> Path:
     if not confirmed:
         raise PermissionError("paid runs require --yes after reviewing the config and cost")
+
+    # `source` below is recorded relative to REPO_ROOT, so the output root must be
+    # absolute; a relative --output-dir would otherwise fail after the first eval.
+    output_root = Path(output_root).expanduser().resolve()
 
     from dotenv import load_dotenv
     from inspect_ai import eval as inspect_eval
