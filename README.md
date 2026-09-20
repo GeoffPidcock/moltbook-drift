@@ -1,14 +1,17 @@
 # Moltbook Drift
+## todo - expected structure of dataset. 
 
 This repository studies whether exposure to a social-media-style feed changes an
 assistant model's immediate choice among candidate posts. It is the research
-artifact for a TARA round 1 capstone by Ayush Kumar, Lion De Leion, and Geoff
-Pidcock, in collaboration with Stephen Elliott at Gigascale Laboratories.
+artifact for a [TARA](https://www.taraprogram.org/) round 1 capstone by Ayush Kumar, Lion De Leion, and Geoff
+Pidcock, in collaboration with Stephen Elliott at [Gigascale Laboratories](https://www.taraprogram.org/).
+
+The motivation - OpenClaw systems are already harming users through misaligned actions and can communicate/collaborate over moltbook. We wanted to explore whether sampled toxic or problematic moltbook posts could illicit misaligned behaviour from an otherwise aligned assistant.
 
 The project uses sampled Moltbook content and synthetic persona-labelled posts from
-the dataset accompanying Jiang et al. Its repeated feed-exposure design is informed
-by the evaluation approach used by Usman: the model reacts to a sequence of posts 
-before completing a held-out behavioural task.
+the dataset accompanying [Jiang et al's paper "Humans welcome to Observe"](https://huggingface.co/datasets/TrustAIRLab/Moltbook). The sister repository, [moltbook-drift-data](https://github.com/thelionlies/moltbook-drift-data/tree/main), uses LLM-judges to label these posts for later experiments and to generate options for a forced choice eval.
+
+The feed-exposure and forced choice experiment design is informed by the adversarial feeds project by [Usman](https://arxiv.org/abs/2606.00914). In this design, the model reacts to a sequence of posts (upvote, follow, or skip) before completing a held-out behavioural task.
 
 The sandbox measures **changes in forced-choice preference after feed exposure**.
 This is limited evidence about an agent's immediate in-context behaviour, not a
@@ -18,44 +21,20 @@ explanations.
 
 ## Results
 
-Across the exploratory runs, exposure to non-harmful stylistic personas (poet and
+Across the exploratory runs, controlling for post category, exposure to posts from non-harmful stylistic personas (poet and
 pirate) produced large shifts away from the assistant option at 20 decisions per
-arm. The poet result was observed again in a separately executed positive-control
-run backed by raw Inspect logs. The harmful-persona conditions produced much
-smaller changes at this sample size, including in the new category-matched Evil-A
-and Manipulative-F runs.
+arm. The harmful-persona conditions (evil, malicious-manipulative) produced smaller shifts. Our experiment had insuficient power to detect a significant effect from harmful personas.
 
-| Exposure | Neutral | Exposed | Difference | Evidence |
-|---|---:|---:|---:|---|
-| Poet, category A | 3/20 | 17/20 | +0.70 | exploratory notebook |
-| Poet, category A (positive-control rerun) | 2/20 | 18/20 | +0.80 | raw Inspect logs |
-| Pirate, category A | 2/20 | 16/20 | +0.70 | exploratory notebook |
-| Manipulative, completed A/B/D runs (descriptive pool) | 4/60 | 5/60 | +0.017 | exploratory notebooks |
-| Manipulative, category F | 0/20 | 0/20 | +0.00 | raw Inspect logs |
-| Evil, category A (three runs) | 0/60 | 3/60 | +0.05 | raw Inspect logs |
-| Evil, category E | 0/20 | 1/20 | +0.05 | exploratory notebook |
+![positive control - pirate](./experiments/08_assistant_poet_A/results/drift_three_arm.png)
 
-“Category” denotes the topic stratum shared by the feed posts and held-out choice
-questions: **A** Identity, **B** Technology, **C** Socializing, **D** Economics,
-**E** Viewpoint, and **F** Promotion. For example, “poet-A” tests poet-style
-exposure and choices within the Identity category. Categories are kept separate
-because their prompts, available persona content, and decision options can differ.
+![manipulative posts](./experiments/04_assistant_manipulative_A/results/drift_three_arm.png)
 
-The A/B/D manipulative row is pooled only as a compact descriptive summary: those
-runs share the same persona contrast and forced-choice option family, and combining
-their counts shows the overall scale of the observations more clearly than three
-very small rows. It is not the primary causal estimate. Category may moderate the
-effect, and those historical notebooks used an earlier sampler without recorded
-data revisions. Manipulative-F is therefore reported separately as a current,
-category-controlled run rather than folded into an inferential A/B/D/F estimate.
 
-The positive-control rerun has one documented qualification: its neutral arm used
-50 source IDs representing 49 unique content strings. The exposed poet arm and
-baseline match the current method, while the neutral result is retained as an
-imperfect control rather than silently discarded.
+Exploring interactions prior to the decision highlights that a model is more likely to upvote or follow posts/authors with malicious (subtly misaligned) content, as opposed to evil (loudly misaligned) content.
 
-The harmful-persona rows should not be read as evidence of no effect: each
-individual arm has only 20 decisions. Exact counts, parse failures, source paths,
+![post interactions](./experiments/figures/fig3_feed_reactions.png)
+
+Exact counts, parse failures, source paths,
 and provenance are recorded in
 [`experiments/results.csv`](experiments/results.csv).
 
@@ -79,7 +58,7 @@ The tested configuration is defined by `ExperimentConfig` and `CONDITIONS` in
 The data live in the separate
 [`thelionlies/moltbook-drift-data`](https://github.com/thelionlies/moltbook-drift-data)
 repository and are pinned to commit
-`b1bd75cd5f3d25c21cf3cf10ed43efd41cc9e6cd`. Feasibility by persona and category is
+`b1bd75cd5f3d25c21cf3cf10ed43efd41cc9e6cd`. Available data is assessed by persona and category before running a condition, and the results are 
 recorded in [`sandbox/coverage.csv`](sandbox/coverage.csv).
 
 ## Project structure
@@ -94,8 +73,9 @@ experiments/
     ├── notebook.ipynb      contemporaneous analysis notebook
     └── logs/               raw Inspect .eval logs for all three arms
 ├── 11_assistant_evil_A_3x/ three matched repetitions, summaries, and raw logs
-└── 12_assistant_manipulative_F/
+├── 12_assistant_manipulative_F/
     └── run/                matched category-F configuration and raw logs
+└── figures/                other figures
 
 sandbox/
 ├── README.md               reproduction and extension guide
@@ -107,8 +87,7 @@ tests/
 └── test_runner.py          offline checks for sampling and scoring rules
 ```
 
-The numbered notebooks are retained as historical evidence, not as the canonical
-runner. Most lack their original `.eval` logs and used an earlier raw sampler.
+Notebooks 1-10 use a previous version of the sandbox/runner. Most lack their original `.eval` logs and used an earlier raw sampler.
 Experiments 10–12 provide log-backed evidence; experiments 11 and 12 use the
 current tested implementation behind the sandbox notebook.
 
@@ -157,7 +136,6 @@ evidence.
 - The experiment measures an in-context response after a long feed; it does not
   establish persistence beyond that context.
 - Some feed and decision data were generated or labelled with language models.
-- Historical notebook runs do not preserve their data revision or raw logs.
 - At `n=20`, absence of a detectable harmful-persona effect is not a tight null.
 
 ## References
